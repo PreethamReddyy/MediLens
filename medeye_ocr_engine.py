@@ -1,6 +1,9 @@
 import easyocr
 import pandas as pd
 from rapidfuzz import fuzz, process
+from gtts import gTTS
+from playsound import playsound
+from translations import build_sentence
 
 # ---- Manufacturer filter ----
 KNOWN_MANUFACTURERS = {
@@ -12,7 +15,7 @@ def is_manufacturer(text):
     return text.strip().lower() in KNOWN_MANUFACTURERS
 
 # ---- Load drug database ----
-df = pd.read_csv('drugs_fixed.csv')
+df = pd.read_csv('drugs_tagged.csv')
 
 all_names = []
 for _, row in df.iterrows():
@@ -37,7 +40,14 @@ def get_drug_info(matched_name):
             return row
     return None
 
-def full_lookup(ocr_text):
+def speak_drug_info(info, lang='en'):
+    sentence = build_sentence(info, lang)
+    filename = f"{info['name']}_{lang}.mp3"
+    gTTS(text=sentence, lang=lang).save(filename)
+    print(f"Audio saved: {filename}")
+    playsound(filename)
+
+def full_lookup(ocr_text, speak_lang='en'):
     matched_name = lookup(ocr_text)
     if matched_name is None:
         print(f"'{ocr_text}' -> No confident match found.")
@@ -47,8 +57,8 @@ def full_lookup(ocr_text):
     print(f"Name: {info['name']}")
     print(f"Dosage forms: {info['dosage_forms']}")
     print(f"Typical dosage: {info['typical_dosage']}")
-    print(f"Commonly used for: {info['commonly_used_for']} (informational only, not a diagnosis)")
-    print(f"Warnings: {info['warnings']}")
+    print(f"Category: {info['category']}")
+    speak_drug_info(info, lang=speak_lang)
 
 # ---- Run OCR on the photo ----
 reader = easyocr.Reader(['en'])
@@ -65,4 +75,4 @@ for detection in result:
             print(f"'{text}' -> Skipped (known manufacturer name, not a drug)")
             continue
         print(f"'{text}'  (OCR confidence: {confidence:.2f})")
-        full_lookup(text)
+        full_lookup(text, speak_lang='te')

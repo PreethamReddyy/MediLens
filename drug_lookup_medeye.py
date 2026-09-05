@@ -1,7 +1,7 @@
 import pandas as pd
 from rapidfuzz import fuzz, process
 
-df = pd.read_csv('drugs_fixed.csv')
+df = pd.read_csv('drugs_expanded_fixed.csv')
 
 all_names = []
 for _, row in df.iterrows():
