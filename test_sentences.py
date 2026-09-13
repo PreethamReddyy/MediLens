@@ -1,6 +1,7 @@
 import pandas as pd
 from translations import build_sentence
 from gtts import gTTS
+from playsound import playsound
 
 df = pd.read_csv('drugs_tagged.csv')
 row = df[df['name'] == 'Cetirizine'].iloc[0]

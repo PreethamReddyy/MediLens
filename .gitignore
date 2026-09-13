@@ -1,3 +1,38 @@
-__pycache__/ 
-*.pyc 
-.pytest_cache/ 
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Generated audio
+audio_cache/
+api_audio/
+*.mp3
+*.wav
+
+# Temporary uploads
+api_uploads/
+
+# Test images
+med2.jpeg
+med2.jpg
+med3.jpeg
+med3.jpg
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Extra documentation dumps
+allprojectcodes.txt
+final all codes.txt
