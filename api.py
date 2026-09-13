@@ -1,286 +1,135 @@
-from pathlib import Path
+"""
+api.py
+
+Lightweight FastAPI backend for MediLens.AI deployment.
+
+IMPORTANT:
+This cloud API intentionally does NOT import medeye_ocr_engine.py because that
+module loads EasyOCR/PyTorch and exceeds Render Free's memory limit.
+OCR is delegated to OCR.space instead.
+"""
+
 import shutil
 import uuid
+from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from medeye_ocr_engine import MediLensOCR
-
-
-# ============================================================
-# PATHS
-# ============================================================
+from ocr_space_engine import MediLensCloudOCR
 
 BASE_DIR = Path(__file__).resolve().parent
-
 UPLOAD_DIR = BASE_DIR / "api_uploads"
 AUDIO_DIR = BASE_DIR / "api_audio"
-
 UPLOAD_DIR.mkdir(exist_ok=True)
 AUDIO_DIR.mkdir(exist_ok=True)
 
-
-# ============================================================
-# FASTAPI APPLICATION
-# ============================================================
-
-app = FastAPI(
-    title="MediLens.AI API",
-    description="Backend API for MediLens.AI medicine recognition",
-    version="1.0.0",
-)
-
-
-# ============================================================
-# CORS
-# ============================================================
+app = FastAPI(title="MediLens.AI API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.mount("/audio", StaticFiles(directory=str(AUDIO_DIR)), name="audio")
 
-# ============================================================
-# AUDIO FILE SERVER
-# ============================================================
+engine = MediLensCloudOCR()
 
-app.mount(
-    "/audio",
-    StaticFiles(directory=str(AUDIO_DIR)),
-    name="audio",
-)
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+ALLOWED_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/bmp",
+}
 
-
-# ============================================================
-# MEDILENS ENGINE
-# ============================================================
-
-print()
-print("=" * 60)
-print("          MEDILENS.AI BACKEND")
-print("=" * 60)
-print("Initializing OCR engine...")
-print()
-
-engine = MediLensOCR()
-
-print()
-print("MediLens OCR engine ready.")
-print("=" * 60)
-print()
-
-
-# ============================================================
-# HEALTH CHECK
-# ============================================================
 
 @app.get("/")
 def root():
     return {
-        "name": "MediLens.AI",
-        "status": "online",
-        "message": "MediLens.AI backend is running.",
+        "service": "MediLens.AI",
+        "status": "running",
+        "ocr": "OCR.space",
     }
 
 
 @app.get("/api/health")
-def health_check():
+def health():
     return {
         "status": "ok",
         "service": "MediLens.AI",
-        "ocr_engine": "ready",
+        "ocr_engine": "OCR.space",
     }
 
-
-# ============================================================
-# HELPERS
-# ============================================================
-
-def allowed_image(filename: str, content_type: str | None) -> bool:
-    allowed_extensions = {
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".webp",
-        ".bmp",
-    }
-
-    extension = Path(filename).suffix.lower()
-
-    if extension not in allowed_extensions:
-        return False
-
-    if content_type and not content_type.startswith("image/"):
-        return False
-
-    return True
-
-
-def prepare_audio_file(audio_path: str | None) -> str | None:
-    """
-    Copies the generated MediLens audio file into the API's
-    public audio directory and returns a browser-friendly URL.
-    """
-
-    if not audio_path:
-        return None
-
-    source = Path(audio_path)
-
-    if not source.exists():
-        return None
-
-    unique_name = f"{uuid.uuid4().hex}_{source.name}"
-    destination = AUDIO_DIR / unique_name
-
-    try:
-        shutil.copy2(source, destination)
-    except Exception as exc:
-        print(f"Audio copy warning: {exc}")
-        return None
-
-    return f"/audio/{destination.name}"
-
-
-# ============================================================
-# MEDICINE SCAN ENDPOINT
-# ============================================================
 
 @app.post("/api/scan")
 async def scan_medicine(
     image: UploadFile = File(...),
     language: str = Form("en"),
 ):
-    """
-    Receives an image from the React frontend,
-    sends it through the existing MediLens OCR pipeline,
-    generates multilingual audio,
-    and returns the medicine information as JSON.
-    """
-
-    # --------------------------------------------------------
-    # Validate language
-    # --------------------------------------------------------
-
-    language = language.lower().strip()
-
     if language not in {"en", "te", "hi"}:
-        language = "en"
+        raise HTTPException(status_code=400, detail="Language must be en, te, or hi.")
 
-    # --------------------------------------------------------
-    # Validate uploaded image
-    # --------------------------------------------------------
+    extension = Path(image.filename or "").suffix.lower()
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Unsupported image format.")
 
-    filename = image.filename or "medicine.jpg"
+    if image.content_type and image.content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported image content type.")
 
-    if not allowed_image(filename, image.content_type):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Please upload a valid medicine image "
-                "(JPG, JPEG, PNG, WEBP, or BMP)."
-            ),
-        )
-
-    # --------------------------------------------------------
-    # Create temporary upload filename
-    # --------------------------------------------------------
-
-    extension = Path(filename).suffix.lower()
-
-    if not extension:
-        extension = ".jpg"
-
-    temporary_filename = f"{uuid.uuid4().hex}{extension}"
-    image_path = UPLOAD_DIR / temporary_filename
-
-    # --------------------------------------------------------
-    # Save uploaded image
-    # --------------------------------------------------------
+    file_id = uuid.uuid4().hex
+    image_path = UPLOAD_DIR / f"{file_id}{extension}"
 
     try:
-        with image_path.open("wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
+        with image_path.open("wb") as output:
+            shutil.copyfileobj(image.file, output)
 
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not save uploaded image: {exc}",
-        )
+        # OCR.space free API has a 1 MB file limit. Reject oversized uploads
+        # instead of sending a request that will definitely fail.
+        if image_path.stat().st_size > 1_000_000:
+            raise HTTPException(
+                status_code=413,
+                detail="Image is larger than 1 MB. Please upload a smaller/compressed image.",
+            )
 
-    # --------------------------------------------------------
-    # Run MediLens OCR pipeline
-    # --------------------------------------------------------
-
-    try:
         result = engine.process_image(
             str(image_path),
             voice_language=language,
-            play_voice=False,
         )
 
-    except Exception as exc:
-        print()
-        print("MediLens processing error:")
-        print(exc)
-        print()
+        for medicine in result.get("medicines", []):
+            audio_path = medicine.pop("audio_path", None)
+            if not audio_path:
+                medicine["audio_url"] = None
+                continue
 
+            source = Path(audio_path)
+            if not source.exists():
+                medicine["audio_url"] = None
+                continue
+
+            destination_name = f"{uuid.uuid4().hex}_{source.name}"
+            destination = AUDIO_DIR / destination_name
+            shutil.copy2(source, destination)
+            medicine["audio_url"] = f"/audio/{destination_name}"
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"Scan failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
         try:
             image_path.unlink(missing_ok=True)
         except Exception:
             pass
 
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "MediLens could not process this image. "
-                "Please try a clearer medicine photograph."
-            ),
-        )
-
-    # --------------------------------------------------------
-    # Remove temporary uploaded image
-    # --------------------------------------------------------
-
-    try:
-        image_path.unlink(missing_ok=True)
-    except Exception:
-        pass
-
-    # --------------------------------------------------------
-    # Prepare audio URLs
-    # --------------------------------------------------------
-
-    medicines = result.get("medicines", [])
-
-    for medicine in medicines:
-        original_audio_path = medicine.get("audio_path")
-
-        audio_url = prepare_audio_file(original_audio_path)
-
-        medicine["audio_url"] = audio_url
-
-        # Do not expose the local Windows file path to React.
-        medicine.pop("audio_path", None)
-
-    # --------------------------------------------------------
-    # Add API metadata
-    # --------------------------------------------------------
-
-    result["language"] = language
-
-    return result
-
-
-# ============================================================
-# RUN DIRECTLY
-# ============================================================
 
 if __name__ == "__main__":
     import uvicorn
