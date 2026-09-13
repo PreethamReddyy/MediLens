@@ -1,0 +1,14 @@
+fastapi==0.141.1
+uvicorn==0.52.0
+python-multipart==0.0.32
+
+easyocr==1.7.2
+opencv-python-headless==5.0.0.93
+Pillow==12.0.0
+numpy==2.3.4
+
+RapidFuzz==3.14.5
+pandas==2.3.3
+
+gTTS==2.5.4
+requests==2.32.5
